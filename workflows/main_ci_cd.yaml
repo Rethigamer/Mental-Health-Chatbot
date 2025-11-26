@@ -1,0 +1,63 @@
+name: CI/CD Pipeline
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  provision_infra:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python (for tests, optional)
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Terraform Init
+      run: terraform init
+      working-directory: infra/
+      
+    - name: Terraform Apply
+      run: terraform apply -auto-approve
+      working-directory: infra/
+      
+  build_and_deploy:
+    needs: provision_infra
+    runs-on: ubuntu-latest
+    steps:
+    - name: Get ACR login server
+      id: acr
+      run: |
+        ACR_NAME=${{ secrets.ACR_NAME }}
+        echo "ACR_NAME=$ACR_NAME" >> $GITHUB_ENV
+        LOGIN_SERVER=$(az acr show -n $ACR_NAME --query loginServer -o tsv)
+        echo "LOGIN_SERVER=$LOGIN_SERVER" >> $GITHUB_ENV
+        echo "::set-output name=login_server::$LOGIN_SERVER"
+
+    - name: Build and tag Docker image
+      run: |
+        docker build -t ${{ env.LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest .
+        echo "Built: ${{ env.LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
+
+    - name: ACR Login
+      run: |
+        az acr login --name ${{ secrets.ACR_NAME }}
+
+    - name: Push image to ACR
+      run: |
+        docker push ${{ env.LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Get AKS credentials
+      run: |
+        az aks get-credentials --resource-group ${{ secrets.RESOURCE_GROUP }} --name ${{ secrets.AKS_NAME }} --overwrite-existing
+
+    - name: Deploy to AKS
+      run: |
+        sed -i "s|REPLACE_IMAGE|${{ env.LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest|g" k8s/deployment.yaml
+        kubectl apply -f k8s/
+        kubectl rollout status deployment/cloud-app -n default --timeout=120s
