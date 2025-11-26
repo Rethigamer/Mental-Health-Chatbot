@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloud-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloud-app
+  template:
+    metadata:
+      labels:
+        app: cloud-app
+    spec:
+      containers:
+      - name: app
+        image: REPLACE_IMAGE
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5000
+        env:
+        - name: AZURE_LANGUAGE_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: azure-language-secret
+              key: AZURE_LANGUAGE_ENDPOINT
+        - name: AZURE_LANGUAGE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: azure-language-secret
+              key: AZURE_LANGUAGE_KEY
